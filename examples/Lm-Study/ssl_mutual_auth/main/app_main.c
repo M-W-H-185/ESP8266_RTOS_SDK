@@ -31,10 +31,15 @@
 
 static const char *TAG = "MQTTS_EXAMPLE";
 
-// extern const uint8_t client_cert_pem_start[] asm("_binary_client_crt_start");
-// extern const uint8_t client_cert_pem_end[] asm("_binary_client_crt_end");
-// extern const uint8_t client_key_pem_start[] asm("_binary_client_key_start");
-// extern const uint8_t client_key_pem_end[] asm("_binary_client_key_end");
+
+typedef struct mqtt_topic_config_t{
+    char qos;
+    const char *topic;
+}mqtt_topic_config;
+ // 设备向平台发送数据
+static const mqtt_topic_config topic_devToIotData = {.qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/thing/property/report"};
+  // 云平台控制设备
+static const mqtt_topic_config topic_IotControlToDevData = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/thing/property/set"};
 
 static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 {
@@ -44,14 +49,8 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            msg_id = esp_mqtt_client_subscribe(client, "/topic/qos0", 0);
+            msg_id = esp_mqtt_client_subscribe(client, topic_IotControlToDevData.topic, topic_IotControlToDevData.qos);
             ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-            msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
-            ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-            msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
-            ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
             break;
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -59,7 +58,11 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 
         case MQTT_EVENT_SUBSCRIBED:
             ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-            msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
+            msg_id = esp_mqtt_client_publish(
+                                                client, topic_devToIotData.topic, 
+                                                "{\"msgId\":\"45lkj3551234***\",\"time\":1626197189638,\"data\":{\"temperature\":{\"value\":32,\"time\":1626197189638},\"switch_led\":{\"value\":true,\"time\":1626197189638}}}",
+                                                0, topic_devToIotData.qos, 0
+                                            );
             ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
             break;
         case MQTT_EVENT_UNSUBSCRIBED:
@@ -69,6 +72,7 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
             ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
             break;
         case MQTT_EVENT_DATA:
+            // mqtt 收到数据事件
             ESP_LOGI(TAG, "MQTT_EVENT_DATA");
             printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
             printf("DATA=%.*s\r\n", event->data_len, event->data);
