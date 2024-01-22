@@ -28,7 +28,7 @@
 
 #include "esp_log.h"
 #include "mqtt_client.h"
-
+#include "cJSON.h"
 static const char *TAG = "MQTTS_EXAMPLE";
 
 
@@ -40,6 +40,44 @@ typedef struct mqtt_topic_config_t{
 static const mqtt_topic_config topic_devToIotData = {.qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/thing/property/report"};
   // 云平台控制设备
 static const mqtt_topic_config topic_IotControlToDevData = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/thing/property/set"};
+
+static const mqtt_topic_config topic_DevToIotOTAInfoVer = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/ota/firmware/report"};
+
+//  返回ota设备的字符串
+static char* ota_DevInfoVer_str(char *bizType, char *pid, char *firmwareKey, int channel, char *version)
+{
+    // /* 创建一个JSON数据对象(链表头结点) -> {} */
+    cJSON *cjson_Boby = cJSON_CreateObject();
+    cJSON_AddStringToObject(cjson_Boby, "msgId", "45lkj3551234***");
+    cJSON_AddNumberToObject(cjson_Boby, "time", 1705912127);
+    // boby下面的data
+    cJSON *cjson_Boby_data = cJSON_CreateObject();
+    cJSON_AddStringToObject(cjson_Boby_data,"bizType",bizType);
+    cJSON_AddStringToObject(cjson_Boby_data,"pid",pid);
+    cJSON_AddStringToObject(cjson_Boby_data,"firmwareKey",firmwareKey);
+    // data下面的oatChannel数组
+    cJSON *oatChannel = cJSON_CreateArray();
+    // oatChannel的元素
+    cJSON *oatChannel_obj1 = cJSON_CreateObject();
+    cJSON_AddNumberToObject(oatChannel_obj1,"channel",channel);
+    cJSON_AddStringToObject(oatChannel_obj1,"version",version);   
+    // 将元素存入oatChannel数组内
+    cJSON_AddItemToArray(oatChannel,oatChannel_obj1);
+    // 将oatChannel数组存入data下
+	cJSON_AddItemToObject(cjson_Boby_data, "otaChannel", oatChannel);
+    // 将data放入boby
+    cJSON_AddItemToObject(cjson_Boby,"data",cjson_Boby_data);
+
+    char* str = NULL;
+    str = cJSON_Print(cjson_Boby);
+
+    cJSON_Delete(cjson_Boby);
+    cJSON_Delete(cjson_Boby_data);
+    cJSON_Delete(oatChannel);
+    cJSON_Delete(oatChannel_obj1);
+
+    return str;
+}
 
 static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 {
@@ -64,6 +102,13 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
                                                 0, topic_devToIotData.qos, 0
                                             );
             ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+
+            
+            char* str =  ota_DevInfoVer_str("INIT","l5jc92kpr20a1wcn","keywrsh88jjv99pr",0,"0.0.0");
+            ESP_LOGI(TAG, "%s\r\n", str);
+            msg_id = esp_mqtt_client_publish( client, topic_DevToIotOTAInfoVer.topic, str, 0, topic_DevToIotOTAInfoVer.qos, 0);
+            ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+            cJSON_free(str);
             break;
         case MQTT_EVENT_UNSUBSCRIBED:
             ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
@@ -121,7 +166,13 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
+    char* str = NULL;
+    str = ota_DevInfoVer_str("111","222","333",444,"555");
 
+    ESP_LOGI(TAG, "%s\r\n", str);
+    cJSON_free(str);
+    
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
      * Read "Establishing Wi-Fi or Ethernet Connection" section in
      * examples/protocols/README.md for more information about this function.
