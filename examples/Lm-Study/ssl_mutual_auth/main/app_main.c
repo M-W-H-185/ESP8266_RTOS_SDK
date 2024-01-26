@@ -113,22 +113,51 @@ uint16_t calculateCRC(char *data, int length) {
     printf("\r\n");
     return crc;
 }
+// 等待ack的信号
+SemaphoreHandle_t uart_ota_wait_ack_semap = NULL;
+
 // uart_data 传入一个空指针进来
 // cmd_id 命令id
 // isack 是否应答
 // data 数据区
 // data_length 数据区的长度
-// void uart_send_cmdid_data_handle(char *uart_rx_data,uint8_t cmd_id, uint8_t isack, char* data, int data_length)
-// {
-//     int uart_rx_data_length = data_length + 6;
-//     uart_rx_data = malloc( uart_rx_data_length * sizeof(char));
+int uart_send_cmdid_data_handle(char **uart_rx_data, uint8_t cmd_id, uint8_t isack, char* data, int data_length)
+{
+    int uart_rx_data_length = data_length + 6;
+    *uart_rx_data = malloc(uart_rx_data_length * sizeof(char));
 
-//     uart_rx_data[0] = UART_DATA_HEAD_1;
-//     uart_rx_data[1] = UART_DATA_HEAD_2;
-//     uart_rx_data[2] = cmd_id;         
-//     uart_rx_data[3] = isack;         
-//     char *data_ = &(uart_rx_data[5]);
-// }
+    (*uart_rx_data)[0] = UART_DATA_HEAD_1;
+    (*uart_rx_data)[1] = UART_DATA_HEAD_2;
+    (*uart_rx_data)[2] = cmd_id;
+    (*uart_rx_data)[3] = isack;
+
+    char *uart_data_ = &((*uart_rx_data)[4]);
+    memcpy(uart_data_, data, data_length * sizeof(char));
+
+    // -2 是要把校验位剪了
+    uint16_t crc = calculateCRC(*uart_rx_data, uart_rx_data_length - 2);
+    (*uart_rx_data)[uart_rx_data_length - 2] = crc & 0xFF;       // 校验和 低位
+    (*uart_rx_data)[uart_rx_data_length - 1] = (crc >> 8) & 0xFF; // 校验和 高位
+
+    return uart_rx_data_length;
+}
+// 发送ack命令
+void uart_send_ack_data(void)
+{
+    char *uart_rx_data = NULL;
+    static const char data[] = {255};
+    int uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x00, 0x00, data, 1);
+    uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
+    // 输出固件debug
+    printf("串口命令debug:");
+    for(int i = 0; i < uart_rx_data_length; i++){
+        printf("%02x ",((char*)uart_rx_data)[i]);
+    }
+    printf("\r\n");
+    free(uart_rx_data);
+    // free(data);
+}
+
 // 开始分批发送固件包
 esp_err_t ota_send_firmware(http_files_data *hf_data)
 {
@@ -137,8 +166,6 @@ esp_err_t ota_send_firmware(http_files_data *hf_data)
     int firmware_size = hf_data->readData_count;
     // memset(firmware, 0x66, firmware_size);
     int firmware_split_number = (int)user_ceil((double)((double)firmware_size / 128.0000));
-
-
 
     char *uart_rx_data = NULL;
     int uart_rx_data_length = 0;
@@ -154,38 +181,59 @@ esp_err_t ota_send_firmware(http_files_data *hf_data)
 			firmware_block_size = firmware_size - ((i)*128);
 		}
 		printf("分包大小：%d\r\n",firmware_block_size);
-        // 固件块大小+7帧头什么的
-        uart_rx_data_length = (firmware_block_size + 7) ;
-        uart_rx_data = malloc( uart_rx_data_length * sizeof(char));
-        memset(uart_rx_data,0,uart_rx_data_length * sizeof(char));
-
-        // 先拼接一下
-        uart_rx_data[0] = UART_DATA_HEAD_1;
-        uart_rx_data[1] = UART_DATA_HEAD_2;
-        uart_rx_data[2] = UART_DATA_ACK_3;            // 需要应答   
-        uart_rx_data[3] = firmware_block_size + 1;    // 数据区的长度
-        uart_rx_data[4] = i;                          // 第几个固件包 uart_firmware_count
-
-        char *data_ = &(uart_rx_data[5]);
-	    memcpy(data_, (char *)(firmware+(i * 128)) ,  firmware_block_size * sizeof(char));
-                                                        // -2 是要把校验位剪了
-        uint16_t crc = calculateCRC(uart_rx_data, uart_rx_data_length - 2);
-
-
-        uart_rx_data[5+firmware_block_size+0] =  crc & 0xFF;        // 校验和 低位
-        uart_rx_data[5+firmware_block_size+1] = (crc >> 8) & 0xFF;  // 校验和 高位
-
+        char *firmware_block = malloc(1 + firmware_block_size);// +1 是因为需要加上现在是第几个固件包 
+        firmware_block[0] = i;  // 现在是第i个固件包
+        char *temp = &firmware_block[1];
+        memcpy( temp, (char *)(firmware+(i * 128)) ,  firmware_block_size * sizeof(char));
+        uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0xf1, 0xf2, firmware_block, firmware_block_size + 1);
         uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
-        
-	    // 输出固件debug
+      
+        // 输出固件debug
         printf("串口命令debug:");
 		for(int i = 0; i < uart_rx_data_length; i++){
 			printf("%02x ",((char*)uart_rx_data)[i]);
 		}
 		printf("\r\n");
+	    // 输出固件debug
+
+        ESP_LOGI("ota_uart:","等待ack中");
+        if(xSemaphoreTake(uart_ota_wait_ack_semap, 1000) == pdTRUE)
+        {
+            ESP_LOGE("ota_uart:","发送%d固件包成功",i);
+        }
+        else{
+            ESP_LOGE("ota_uart:","发送固件包失败:接收方未返回应答信号");
+            uint8_t anew_count = 0;  // 重新发送五次
+            bool success_flag = false;
+            while(anew_count < 5){
+                ESP_LOGE("ota_uart:","重发机制启动,重新发送%d固件包",i);
+                anew_count++;
+                // 再次等待 五次后就抛出异常了
+                uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
+                if(xSemaphoreTake(uart_ota_wait_ack_semap, 1000) == pdTRUE)
+                {
+                    ESP_LOGE("ota_uart:","发送%d固件包成功",i);
+                    success_flag = true;  // 设置成功标志
+                    break;  // 跳出循环，因为成功发送
+                }  
+                else{
+                    ESP_LOGE("ota_uart:","重发机制->发送固件包失败:接收方未返回应答信号");
+                    success_flag = false;  // 设置失败标志
+                }
+            }
+            if (success_flag == false) 
+            {
+                // 如果标志为false，表示在重新发送的过程中都未成功接收到应答信号
+                return ESP_FAIL;
+            }
+        }
+	  
 		// 释放分配的内存
         free(uart_rx_data);
+        free(firmware_block);
     }
+
+    ESP_LOGE("ota_uart:","固件已发送完成...");
     return ESP_OK;
 }
 
@@ -216,8 +264,8 @@ void ota_uart_data_handle(char *uart_data, int length)
     // 从串口包读取的校验和
     uint8_t uart_crc_low = uart_data[length-2];
     uint8_t uart_crc_high = uart_data[length-1];
-    // ESP_LOGI("ota_uart:","通过串口数据算出来的校验和 %02x %02x",  analysis_crc_low , analysis_crc_high);
-    // ESP_LOGI("ota_uart:","读取串口收到的校验和 %02x %02x",  uart_crc_low, uart_crc_high);
+    ESP_LOGI("ota_uart:","通过串口数据算出来的校验和 %02x %02x",  analysis_crc_low , analysis_crc_high);
+    ESP_LOGI("ota_uart:","读取串口收到的校验和 %02x %02x",  uart_crc_low, uart_crc_high);
 
     if(analysis_crc_low != uart_crc_low || analysis_crc_high != uart_crc_high)
     {
@@ -225,33 +273,29 @@ void ota_uart_data_handle(char *uart_data, int length)
         return;
     }
 
-    // char *cmd_id = &data[2];
-    // char *data_length = &data[3];   // 数据区的长度
-    // char *data_ = &data[4];         // 数据区的数据
-    // // uint16_t read_crc =  ((uint16_t)data[data_length] << 8) | data[data_length+1];
-    // // uint16_t crc = calculateCRC(data_, (int)data_length);
-    // ESP_LOGI("ota_uart:","cmdid:%02x data_length:%02x read_crc_gao:%02x read_crc_di:%02x",
-    //     *cmd_id,*data_length,*(data_),*(data_+1)
-    //     );
-    // switch (*cmd_id)
-    // {
-    //     case 0x00:
-    //             ESP_LOGE("ota_uart:","双方通用的应答包命令\r\n"); 
-    //         break;
-    //     case 0x01:
-    //             ESP_LOGE("ota_uart:","版本信息命令\r\n"); 
-    //         break;
-    //     case 0x02:
-    //             ESP_LOGE("ota_uart:","bool模式命令\r\n"); 
-    //         break;
-    //     case 0x03:
-    //             //  固件包命令固件包 data[data_length] = 第几个固件包 
-    //             // data[data_length+1]开始才是固件数据
-    //             ESP_LOGE("ota_uart:","固件包命令\r\n"); 
-    //         break;
-    //     default:
-    //         break;
-    // }
+    char *cmd_id = &uart_data[2];
+    char *isack = &uart_data[3]; 
+    char *data_ = &uart_data[4];         // 数据区的数据
+    switch (*cmd_id)
+    {
+        case 0x00:
+                ESP_LOGI("ota_uart:","双方通用的应答包命令\r\n"); 
+                xSemaphoreGive(uart_ota_wait_ack_semap);
+            break;
+        case 0x01:
+                ESP_LOGI("ota_uart:","版本信息命令\r\n"); 
+            break;
+        case 0x02:
+                ESP_LOGI("ota_uart:","bool模式命令\r\n"); 
+            break;
+        case 0x03:
+                //  固件包命令固件包 data[data_length] = 第几个固件包 
+                // data[data_length+1]开始才是固件数据
+                ESP_LOGI("ota_uart:","固件包命令\r\n"); 
+            break;
+        default:
+            break;
+    }
 }
 
 static void uart_select_task()
@@ -291,6 +335,8 @@ static void uart_select_task()
 */
 void UART_Init(void)
 {
+    uart_ota_wait_ack_semap =  xSemaphoreCreateBinary();    // 创建一个二值信号量用于等待串口ato
+
     // 创建一个uart任务处理事件
     xTaskCreate(uart_select_task, "uart_select_task", 4*1024, NULL, 5, NULL);
 }
@@ -312,12 +358,15 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     UART_Init();
+ 
+
     ESP_ERROR_CHECK(example_connect());
 
     http_files_data *myData;
     myData = malloc(sizeof(http_files_data)); // 为结构体指针分配内存
     http_dowm_files(myData,"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin");
     ota_send_firmware(myData);
-
+    vTaskDelay(200);
+    uart_send_ack_data();
     mqtt_app_start();
 }
