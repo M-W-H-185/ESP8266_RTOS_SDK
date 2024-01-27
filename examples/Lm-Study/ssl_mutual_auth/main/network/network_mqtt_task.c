@@ -5,8 +5,10 @@
 #include "tuya_sdk.h"
 #include "cJSON.h"
 static const char *TAG = "MQTTS_EXAMPLE";
+#define  MQTT_BUFF_LENGTH 1024*2
+static char mqtt_buff[MQTT_BUFF_LENGTH] = {0};
 
-
+esp_mqtt_client_handle_t mqtt_client; 
 typedef struct mqtt_topic_config_t{
     char qos;
     const char *topic;
@@ -16,12 +18,30 @@ static const mqtt_topic_config topic_devToIotData = {.qos = 0, .topic = "tylink/
 // 设备向云平台发送OTA设备信息  版本之类
 static const mqtt_topic_config topic_DevToIotOTAInfoVer = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/ota/firmware/report"};
 
+// 设备向云平台上报ota升级进度
+// static const mqtt_topic_config topic_DevToIotOTAUpgradeProgress = {.qos = 0, .topic="tylink/2682965a7c28aaee3b0zdk/ota/progress/report"};
+
 // 云平台控制设备
 static const mqtt_topic_config topic_IotControlToDevData = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/thing/property/set"};
 // 云平台向设备发送固件升级包uri
 static const mqtt_topic_config topic_IotToDevOTAissue = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/ota/issue"};
 
+esp_err_t mqtt_topic_DevToIotOTAUpgradeProgress(int channel,int progress)
+{
+    // int msg_id = 1;
+    // char* str = ota_OTAUpgradeProgressToJSON(1,1);
+    // ESP_LOGI(TAG,"%s\r\n",str);
+    // cJSON_free(str);
 
+    // msg_id = esp_mqtt_client_publish(
+    //                 mqtt_client, topic_DevToIotOTAUpgradeProgress.topic, 
+    //                 str,
+    //                 0, topic_DevToIotOTAUpgradeProgress.qos, 0
+    //             );
+    // ESP_LOGI(TAG, "mqtt_topic_DevToIotOTAUpgradeProgress msg_id=%d", msg_id);
+    return ESP_OK;
+    
+}
 static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 {
     esp_mqtt_client_handle_t client = event->client;
@@ -50,12 +70,16 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
                                                 0, topic_devToIotData.qos, 0
                                             );
             ESP_LOGI(TAG, "11111111111111111111sent publish successful, msg_id=%d", msg_id);
-            // 推送ota信息
-            char* str =  ota_DevInfoVer_str("INIT","l5jc92kpr20a1wcn","keywrsh88jjv99pr",9,"0.0.0");
-            msg_id = esp_mqtt_client_publish( client, topic_DevToIotOTAInfoVer.topic, str, 0, topic_DevToIotOTAInfoVer.qos, 0);
+
+            // // 推送ota信息
+            // memset(mqtt_buff,'\0',MQTT_BUFF_LENGTH);    // 清空
+            // ota_DevInfoVer_str(mqtt_buff,"INIT","l5jc92kpr20a1wcn","keywrsh88jjv99pr",9,"0.0.0");    // 转换json
+
+
+            // ESP_LOGI(TAG,"%s\r\n",mqtt_buff);
+            msg_id = esp_mqtt_client_publish( client, topic_DevToIotOTAInfoVer.topic, "mqtt_buff", 0, topic_DevToIotOTAInfoVer.qos, 0);
             ESP_LOGI(TAG, "22222222222222222222sent publish successful, msg_id=%d", msg_id);
-            cJSON_free(str);
-            
+
             break;
         case MQTT_EVENT_UNSUBSCRIBED:
             ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
@@ -78,8 +102,6 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
     }
     return ESP_OK;
 }
-
-esp_mqtt_client_handle_t mqtt_client; 
 void mqtt_app_start(void)
 {
     const esp_mqtt_client_config_t mqtt_cfg = {

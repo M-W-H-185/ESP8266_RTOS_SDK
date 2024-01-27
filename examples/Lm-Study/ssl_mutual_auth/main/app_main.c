@@ -145,7 +145,7 @@ int uart_send_cmdid_data_handle(char **uart_rx_data, uint8_t cmd_id, uint8_t isa
 void uart_send_ack_data(void)
 {
     char *uart_rx_data = NULL;
-    static const char data[] = {255};
+    static char data[] = {255};
     int uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x00, 0x00, data, 1);
     uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
     // 输出固件debug
@@ -159,7 +159,7 @@ void uart_send_ack_data(void)
 }
 
 // 开始分批发送固件包
-esp_err_t ota_send_firmware(http_files_data *hf_data)
+esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data)
 {
     // 固件拆分次数
     char* firmware = (char*)hf_data->data;
@@ -227,12 +227,16 @@ esp_err_t ota_send_firmware(http_files_data *hf_data)
                 return ESP_FAIL;
             }
         }
-	  
+        // 固件传输进度计算
+        int Send_percentage = (int)(((double)(i+1) / (double)firmware_split_number) * (double)100.00);
+        ESP_LOGI("ota_uart:","当前传输进度:%d%%",Send_percentage);
+        // mqtt_topic_DevToIotOTAUpgradeProgress(9,Send_percentage);
 		// 释放分配的内存
         free(uart_rx_data);
         free(firmware_block);
     }
-
+    ESP_LOGI("ota_uart:","当前传输进度:%d%%",100);
+    // mqtt_topic_DevToIotOTAUpgradeProgress(9,100);
     ESP_LOGE("ota_uart:","固件已发送完成...");
     return ESP_OK;
 }
@@ -340,7 +344,6 @@ void UART_Init(void)
     // 创建一个uart任务处理事件
     xTaskCreate(uart_select_task, "uart_select_task", 4*1024, NULL, 5, NULL);
 }
-
 void app_main(void)
 {
     ESP_LOGI(TAG, "[APP] Startup..");
@@ -354,19 +357,38 @@ void app_main(void)
     esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
     esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
 
+    ESP_LOGI(TAG,"Version: %s\n", cJSON_Version());
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     UART_Init();
- 
+
+    
+    // // char* str = ota_OTAUpgradeProgressToJSON(1,1);
+    // // ESP_LOGI(TAG,"%s",str);
+    // // cJSON_free(str);
+    static char buff[2000] = {0};
+    memset(buff, '\0', 2000);
+
+    ota_DevInfoVer_str(buff, "1","2","3", 0,"4");
+    ESP_LOGI(TAG,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%s",buff);
+    // // ESP_LOGI(TAG,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%s  \r\n %d",temo,strlen(temo));
 
     ESP_ERROR_CHECK(example_connect());
-
-    http_files_data *myData;
-    myData = malloc(sizeof(http_files_data)); // 为结构体指针分配内存
-    http_dowm_files(myData,"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin");
-    ota_send_firmware(myData);
-    vTaskDelay(200);
-    uart_send_ack_data();
     mqtt_app_start();
+    vTaskDelay(1000);
+
+
+    // 解析涂鸦ota固件json数据
+    // tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
+    // memset(tuy_otaInfo.url, '\0', 800);
+    // memset(tuy_otaInfo.version, '\0', 30);
+    // ota_readIotIssueData(&tuy_otaInfo,"{\"data\":{\"size\":\"4496\",\"cdnUrl\":\"https://images.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"hmac\":\"550BA7BA04C010C7F793959E0CB0A2D1B093B82DB2F35D37398AB31CF1B57C84\",\"channel\":9,\"upgradeType\":0,\"execTime\":0,\"httpsUrl\":\"https://fireware.tuyacn.com:1443/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"version\":\"0.0.1\",\"url\":\"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"md5\":\"949c276b81e0f01bf722d2c1320800f0\"},\"msgId\":\"981390931722113025\",\"time\":1705973278,\"version\":\"1.0\"}");
+    // 使用解析出来的url固件下载下来后利用串口分包发送
+    // http_files_data myData;
+    // http_dowm_files(&myData,"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin");
+    // ota_send_firmware(&tuy_otaInfo,&myData);
+
+
+
 }
