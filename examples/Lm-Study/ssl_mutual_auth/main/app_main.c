@@ -93,10 +93,10 @@ int user_ceil(float num) {
 uint16_t calculateCRC(char *data, int length) {
     unsigned int i;
     unsigned short crc = 0xFFFF;  //crc16位寄存器初始值
-    printf("crc16_modbus校验->length:%d data:",length);
+    // printf("crc16_modbus校验->length:%d data:",length);
     while(length--)
     {
-        printf("%02x ",*data);
+        // printf("%02x ",*data);
         crc ^= *data++;
         for (i = 0; i < 8; ++i)
         {
@@ -110,7 +110,7 @@ uint16_t calculateCRC(char *data, int length) {
             }
         }
     }
-    printf("\r\n");
+    // printf("\r\n");
     return crc;
 }
 // 等待ack的信号
@@ -123,7 +123,8 @@ SemaphoreHandle_t uart_ota_wait_ack_semap = NULL;
 // data_length 数据区的长度
 int uart_send_cmdid_data_handle(char **uart_rx_data, uint8_t cmd_id, uint8_t isack, char* data, int data_length)
 {
-    int uart_rx_data_length = data_length + 6;
+    
+    int uart_rx_data_length = data_length + 8;
     *uart_rx_data = malloc(uart_rx_data_length * sizeof(char));
 
     (*uart_rx_data)[0] = UART_DATA_HEAD_1;
@@ -131,7 +132,10 @@ int uart_send_cmdid_data_handle(char **uart_rx_data, uint8_t cmd_id, uint8_t isa
     (*uart_rx_data)[2] = cmd_id;
     (*uart_rx_data)[3] = isack;
 
-    char *uart_data_ = &((*uart_rx_data)[4]);
+    (*uart_rx_data)[4] =  (data_length >> 8) & 0xFF; // 数据长度 高位
+    (*uart_rx_data)[5] = data_length & 0xFF;       // 数据长度 低位
+
+    char *uart_data_ = &((*uart_rx_data)[6]);
     memcpy(uart_data_, data, data_length * sizeof(char));
 
     // -2 是要把校验位剪了
@@ -164,7 +168,7 @@ esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data
     // 固件拆分次数
     char* firmware = (char*)hf_data->data;
     int firmware_size = hf_data->readData_count;
-    // memset(firmware, 0x66, firmware_size);
+    memset(firmware, 0x66, firmware_size);
     int firmware_split_number = (int)user_ceil((double)((double)firmware_size / 128.0000));
 
     char *uart_rx_data = NULL;
@@ -172,7 +176,7 @@ esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data
     for (int i = 0; i < firmware_split_number; i++)
     {
        	int firmware_block_size = 0;	// 固件包大小
-		printf("第%d次拆分->固件当前索引位:%d", i, (i * 128));
+		ESP_LOGI("ota_uart:","第%d次拆分->固件当前索引位:%d", i, (i * 128));
 		if(firmware_size - (i*128) > 128 )
 		{
 			firmware_block_size = 128;
@@ -185,7 +189,7 @@ esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data
         firmware_block[0] = i;  // 现在是第i个固件包
         char *temp = &firmware_block[1];
         memcpy( temp, (char *)(firmware+(i * 128)) ,  firmware_block_size * sizeof(char));
-        uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0xf1, 0xf2, firmware_block, firmware_block_size + 1);
+        uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x03, 0x01, firmware_block, firmware_block_size + 1);
         uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
       
         // 输出固件debug
@@ -277,10 +281,11 @@ void ota_uart_data_handle(char *uart_data, int length)
         return;
     }
 
-    char *cmd_id = &uart_data[2];
-    char *isack = &uart_data[3]; 
-    char *data_ = &uart_data[4];         // 数据区的数据
-    switch (*cmd_id)
+    char cmd_id = uart_data[2];
+    char isack = uart_data[3]; 
+    uint16_t data_length = ((uart_data)[4] << 8) | (uart_data)[5];  // 数据区长度
+
+    switch (cmd_id)
     {
         case 0x00:
                 ESP_LOGI("ota_uart:","双方通用的应答包命令\r\n"); 
@@ -380,14 +385,14 @@ void app_main(void)
 
 
     // 解析涂鸦ota固件json数据
-    // tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
-    // memset(tuy_otaInfo.url, '\0', 800);
-    // memset(tuy_otaInfo.version, '\0', 30);
-    // ota_readIotIssueData(&tuy_otaInfo,"{\"data\":{\"size\":\"4496\",\"cdnUrl\":\"https://images.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"hmac\":\"550BA7BA04C010C7F793959E0CB0A2D1B093B82DB2F35D37398AB31CF1B57C84\",\"channel\":9,\"upgradeType\":0,\"execTime\":0,\"httpsUrl\":\"https://fireware.tuyacn.com:1443/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"version\":\"0.0.1\",\"url\":\"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"md5\":\"949c276b81e0f01bf722d2c1320800f0\"},\"msgId\":\"981390931722113025\",\"time\":1705973278,\"version\":\"1.0\"}");
+    tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
+    memset(tuy_otaInfo.url, '\0', 800);
+    memset(tuy_otaInfo.version, '\0', 30);
+    ota_readIotIssueData(&tuy_otaInfo,"{\"data\":{\"size\":\"4496\",\"cdnUrl\":\"https://images.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"hmac\":\"550BA7BA04C010C7F793959E0CB0A2D1B093B82DB2F35D37398AB31CF1B57C84\",\"channel\":9,\"upgradeType\":0,\"execTime\":0,\"httpsUrl\":\"https://fireware.tuyacn.com:1443/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"version\":\"0.0.1\",\"url\":\"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"md5\":\"949c276b81e0f01bf722d2c1320800f0\"},\"msgId\":\"981390931722113025\",\"time\":1705973278,\"version\":\"1.0\"}");
     // 使用解析出来的url固件下载下来后利用串口分包发送
-    // http_files_data myData;
-    // http_dowm_files(&myData,"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin");
-    // ota_send_firmware(&tuy_otaInfo,&myData);
+    http_files_data myData;
+    http_dowm_files(&myData,"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin");
+    ota_send_firmware(&tuy_otaInfo,&myData);
 
 
 
