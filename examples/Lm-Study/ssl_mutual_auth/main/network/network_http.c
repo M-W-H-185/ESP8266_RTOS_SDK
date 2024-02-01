@@ -29,7 +29,7 @@ esp_err_t http_event_handler(esp_http_client_event_t *evt)
             if(strcmp(evt->header_key,"Content-Length") == 0)
             {
                 int num = atoi(evt->header_value);
-                ESP_LOGI(TAG, "Content-Length = %d\n", num);
+                ESP_LOGI(TAG, "Content-Length = %d  and malloc\n", num);
                 // ------------------- 分配内存 -------------------
                 myData->data = malloc(num);
                 // 检查内存分配是否成功

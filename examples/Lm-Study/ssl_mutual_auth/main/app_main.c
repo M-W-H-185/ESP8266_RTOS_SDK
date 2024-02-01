@@ -168,7 +168,7 @@ esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data
     // 固件拆分次数
     char* firmware = (char*)hf_data->data;
     int firmware_size = hf_data->readData_count;
-    memset(firmware, 0x66, firmware_size);
+    // memset(firmware, 0x66, firmware_size);
     int firmware_split_number = (int)user_ceil((double)((double)firmware_size / 128.0000));
 
     char *uart_rx_data = NULL;
@@ -380,20 +380,18 @@ void app_main(void)
     // // ESP_LOGI(TAG,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%s  \r\n %d",temo,strlen(temo));
 
     ESP_ERROR_CHECK(example_connect());
-    mqtt_app_start();
-    vTaskDelay(1000);
+    // mqtt_app_start();
+    vTaskDelay(5);
 
 
-    // 解析涂鸦ota固件json数据
+    // // 解析涂鸦ota固件json数据
     tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
     memset(tuy_otaInfo.url, '\0', 800);
     memset(tuy_otaInfo.version, '\0', 30);
-    ota_readIotIssueData(&tuy_otaInfo,"{\"data\":{\"size\":\"4496\",\"cdnUrl\":\"https://images.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"hmac\":\"550BA7BA04C010C7F793959E0CB0A2D1B093B82DB2F35D37398AB31CF1B57C84\",\"channel\":9,\"upgradeType\":0,\"execTime\":0,\"httpsUrl\":\"https://fireware.tuyacn.com:1443/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"version\":\"0.0.1\",\"url\":\"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin\",\"md5\":\"949c276b81e0f01bf722d2c1320800f0\"},\"msgId\":\"981390931722113025\",\"time\":1705973278,\"version\":\"1.0\"}");
-    // 使用解析出来的url固件下载下来后利用串口分包发送
+    // ota_readIotIssueData(&tuy_otaInfo,"{\"data\":{\"size\":\"7960\",\"cdnUrl\":\"https://images.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/1706768807678190c9677.bin\",\"hmac\":\"74C1C88337F71A8F1228FFEEE18EC386A8DD6381C93F247D782BA85894EB6DF8\",\"channel\":9,\"upgradeType\":0,\"execTime\":0,\"httpsUrl\":\"https://fireware.tuyacn.com:1443/smart/firmware/upgrade/bay1705565836444xBls/1706768807678190c9677.bin\",\"version\":\"0.0.1\",\"url\":\"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/1706768807678190c9677.bin\",\"md5\":\"e11f5cc302aca5721358b48f2a19a156\"},\"msgId\":\"984734436576792577\",\"time\":1706770431,\"version\":\"1.0\"}");
+    // // 使用解析出来的url固件下载下来后利用串口分包发送
     http_files_data myData;
-    http_dowm_files(&myData,"http://airtake-public-data-1254153901.cos.tuyacn.com/smart/firmware/upgrade/bay1705565836444xBls/17059072757e724aa563f.bin");
+    http_dowm_files(&myData,"http://note-xm.oss-cn-guangzhou.aliyuncs.com/otatest/stm32_app_v0.0.1.bin");
     ota_send_firmware(&tuy_otaInfo,&myData);
-
-
 
 }
