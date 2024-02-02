@@ -185,11 +185,12 @@ esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data
 			firmware_block_size = firmware_size - ((i)*128);
 		}
 		printf("分包大小：%d\r\n",firmware_block_size);
-        char *firmware_block = malloc(1 + firmware_block_size);// +1 是因为需要加上现在是第几个固件包 
-        firmware_block[0] = i;  // 现在是第i个固件包
-        char *temp = &firmware_block[1];
+        char *firmware_block = malloc(2 + firmware_block_size);// +1 是因为需要加上现在是第几个固件包 
+        firmware_block[0] = i ;      // 现在是第i个固件包
+        firmware_block[1] = firmware_split_number - 1; // 一共有多少个分包 - 1 从0开始计算 0、1、2、3
+        char *temp = &firmware_block[2];
         memcpy( temp, (char *)(firmware+(i * 128)) ,  firmware_block_size * sizeof(char));
-        uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x03, 0x01, firmware_block, firmware_block_size + 1);
+        uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x03, 0x01, firmware_block, firmware_block_size + 2);
         uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
       
         // 输出固件debug
