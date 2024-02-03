@@ -83,7 +83,7 @@ esp_err_t http_dowm_files(http_files_data *hf_data,char* url)
         ESP_LOGI(TAG, "File downloaded successfully\n");
         for (int i = 0; i < hf_data->readData_count; i++)
         {
-            printf("%02x",((char*)hf_data->data)[i]);
+            printf("%02x ",((char*)hf_data->data)[i]);
         }
         printf("\r\n");
 
