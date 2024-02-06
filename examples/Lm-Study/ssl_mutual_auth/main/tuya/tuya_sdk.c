@@ -80,7 +80,7 @@ void ota_DevInfoVer_str(char*buff,char *bizType, char *pid, char *firmwareKey, i
 
 }
 // 解析云平台发过来的固件json 利用url下载固件
-char* ota_readIotIssueData(tuya_ota_info *tuy_otaInfo, char* issuedata_str)
+void ota_readIotIssueData(tuya_ota_info *tuy_otaInfo, char* issuedata_str)
 {
     cJSON* issuedata_body = cJSON_Parse(issuedata_str);
     cJSON* issuedata_body_time = cJSON_GetObjectItem(issuedata_body,"time");
@@ -103,7 +103,7 @@ char* ota_readIotIssueData(tuya_ota_info *tuy_otaInfo, char* issuedata_str)
     memcpy(tuy_otaInfo->version,issuedata_body_data_version->valuestring,strlen(issuedata_body_data_version->valuestring) );
     ESP_LOGI(TAG, "4 version:%s", tuy_otaInfo->version);
 
-    char *url = issuedata_body_data_url->valuestring;
+    // char *url = issuedata_body_data_url->valuestring;
 
     cJSON_Delete(issuedata_body);
     cJSON_Delete(issuedata_body_time);
@@ -111,6 +111,6 @@ char* ota_readIotIssueData(tuya_ota_info *tuy_otaInfo, char* issuedata_str)
     cJSON_Delete(issuedata_body_data_channel);
     cJSON_Delete(issuedata_body_data_url);
     cJSON_Delete(issuedata_body_data_version);
-    return url;
+    // return url;
 }
 

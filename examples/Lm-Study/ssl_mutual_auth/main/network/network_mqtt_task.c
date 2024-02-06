@@ -1,9 +1,12 @@
-#include "network_mqtt_task.h"
 #include "mqtt_client.h"
+#include "network_mqtt_task.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "ota_send_handle.h"
 #include "tuya_sdk.h"
 #include "cJSON.h"
+#include "network_http.h"
+
 static const char *TAG = "MQTTS_EXAMPLE";
 #define  MQTT_BUFF_LENGTH 1024*2
 static char mqtt_buff[MQTT_BUFF_LENGTH] = {0};
@@ -19,28 +22,56 @@ static const mqtt_topic_config topic_devToIotData = {.qos = 0, .topic = "tylink/
 static const mqtt_topic_config topic_DevToIotOTAInfoVer = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/ota/firmware/report"};
 
 // 设备向云平台上报ota升级进度
-// static const mqtt_topic_config topic_DevToIotOTAUpgradeProgress = {.qos = 0, .topic="tylink/2682965a7c28aaee3b0zdk/ota/progress/report"};
+static const mqtt_topic_config topic_DevToIotOTAUpgradeProgress = {.qos = 0, .topic="tylink/2682965a7c28aaee3b0zdk/ota/progress/report"};
 
 // 云平台控制设备
 static const mqtt_topic_config topic_IotControlToDevData = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/thing/property/set"};
-// 云平台向设备发送固件升级包uri
+// 云平台向设备发送固件升级包uri 也就是通知设备升级了
 static const mqtt_topic_config topic_IotToDevOTAissue = { .qos = 0, .topic = "tylink/2682965a7c28aaee3b0zdk/ota/issue"};
 
+// 上报ota升级进度
 esp_err_t mqtt_topic_DevToIotOTAUpgradeProgress(int channel,int progress)
 {
-    // int msg_id = 1;
-    // char* str = ota_OTAUpgradeProgressToJSON(1,1);
-    // ESP_LOGI(TAG,"%s\r\n",str);
-    // cJSON_free(str);
+    int msg_id = 1;
+    char* str = ota_OTAUpgradeProgressToJSON(channel,progress);
+    ESP_LOGI(TAG,"%s\r\n",str);
+    cJSON_free(str);
 
-    // msg_id = esp_mqtt_client_publish(
-    //                 mqtt_client, topic_DevToIotOTAUpgradeProgress.topic, 
-    //                 str,
-    //                 0, topic_DevToIotOTAUpgradeProgress.qos, 0
-    //             );
-    // ESP_LOGI(TAG, "mqtt_topic_DevToIotOTAUpgradeProgress msg_id=%d", msg_id);
+    msg_id = esp_mqtt_client_publish(
+                    mqtt_client, topic_DevToIotOTAUpgradeProgress.topic, 
+                    str,
+                    0, topic_DevToIotOTAUpgradeProgress.qos, 0
+                );
+    ESP_LOGI(TAG, "mqtt_topic_DevToIotOTAUpgradeProgress msg_id=%d", msg_id);
     return ESP_OK;
     
+}
+// 订阅mqtt主题信息的处理
+static esp_err_t mqtt_subscribe_data_handler(esp_mqtt_event_handle_t event)
+{
+    printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+    printf("DATA=%.*s\r\n", event->data_len, event->data);
+    // 通过topic判断平台发送过来的是什么东西
+    // 云平台控制设备
+    if(strcmp(topic_IotControlToDevData.topic, event->topic))
+    {
+        ESP_LOGI(TAG,"平台控制设备\r\n");
+    }
+
+    // 云平台向设备发送固件升级包uri 也就是通知设备升级了
+    if(strcmp(topic_IotToDevOTAissue.topic, event->topic))
+    {
+        ESP_LOGI(TAG,"ota升级通知\r\n");
+
+        tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
+        memset(tuy_otaInfo.url, '\0', 800);
+        memset(tuy_otaInfo.version, '\0', 30);
+        ota_readIotIssueData(&tuy_otaInfo, event->data);
+        http_files_data myData;
+        http_dowm_files(&myData, tuy_otaInfo.url);
+        ota_send_firmware(&tuy_otaInfo, &myData);
+    }
+    return ESP_OK;
 }
 static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 {
@@ -89,9 +120,10 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
             break;
         case MQTT_EVENT_DATA:
             // mqtt 收到数据事件
-            ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-            printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-            printf("DATA=%.*s\r\n", event->data_len, event->data);
+            // ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+            // printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+            // printf("DATA=%.*s\r\n", event->data_len, event->data);
+            mqtt_subscribe_data_handler(event);
             break;
         case MQTT_EVENT_ERROR:
             ESP_LOGI(TAG, "MQTT_EVENT_ERROR");

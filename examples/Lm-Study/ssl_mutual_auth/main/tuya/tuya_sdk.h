@@ -17,5 +17,5 @@ char* ota_OTAUpgradeProgressToJSON(int channel,int progress);
 void ota_DevInfoVer_str(char *buff, char *bizType, char *pid, char *firmwareKey, int channel, char *version);
 
 // 解析云平台发过来的固件json 利用url下载固件
-char* ota_readIotIssueData(tuya_ota_info *tuy_otaInfo, char* issuedata_str);
+void ota_readIotIssueData(tuya_ota_info *tuy_otaInfo, char* issuedata_str);
 
