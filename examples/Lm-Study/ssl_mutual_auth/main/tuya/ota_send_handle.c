@@ -124,9 +124,11 @@ int uart_send_cmdid_data_handle(char **uart_rx_data, uint8_t cmd_id, uint8_t isa
 // 发送ack命令
 void uart_send_ack_data(void)
 {
+    static uint8_t cmd_id = 0x00;
+    static uint8_t is_ack = 0x02;
     char *uart_rx_data = NULL;
     char data[] = {00};
-    int uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x00, 0x00, data, 1);
+    int uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, cmd_id, is_ack, data, 1);
     uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
     // 输出固件debug
     printf("串口命令debug:");
@@ -138,12 +140,70 @@ void uart_send_ack_data(void)
     // free(data);
 }
 // 让设备接入bootloader模式
-void cmd_send_dev_bootloader_model(void)
+esp_err_t cmd_send_dev_bootloader_model(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data)
 {
-    // char *uart_rx_data = NULL;
-    // char data[] = {2};
-    // int uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x00, 0x00, data, 1);
+    xSemaphoreTake(uart_ota_wait_ack_semap, 0); // 先把标志位释放了再说
 
+    static uint8_t cmd_id = 0x02;
+    static uint8_t is_ack = 0x01;
+    uint16_t data_size = 
+                    sizeof(uint32_t) + sizeof(uint32_t) + // 固件大小 + 固件crc校验
+                    sizeof(uint8_t) +   // 版本字符串长度
+                    strlen(tuya_otoInfo->version); // 字符串空间
+    char *data = malloc(data_size); // 加上crc校验和
+    memset(data,0x66,data_size);
+    // 固件大小
+    data[0] = (uint8_t)((hf_data->readData_count >> 16) & 0xFF);    // 获取高8位
+    data[1] = (uint8_t)((hf_data->readData_count >> 8) & 0xFF);     // 获取中8位
+    data[2] = (uint8_t)((hf_data->readData_count & 0xFF));          // 获取低8位
+    data[3] = 0x00;
+    // 固件大小
+
+    // 固件crc校验
+    uint16_t firmware_crc = calculateCRC(hf_data->data, hf_data->readData_count);
+    data[4] = (uint8_t)((firmware_crc >> 8) & 0xFF);   // 获取高8位
+    data[5] = (uint8_t)(firmware_crc & 0xFF);          // 获取低8位
+    data[6] = 0x00;                             // 预留位
+    data[7] = 0x00;                             // 预留位
+    // 固件crc校验
+
+    // 固件版本字符串
+             
+    data[8] = strlen(tuya_otoInfo->version);
+    char *data_versioin_str = &data[9]; // 版本字符串开始
+    for (int i = 0; i < data[8]; i++)
+    {
+        data_versioin_str[i] = tuya_otoInfo->version[i];
+    }
+    
+    // 固件版本字符串
+    ESP_LOGI("ota_uart:",
+    "cmd_send_dev_bootloader_model->dataSize:%d firmwaerSize:%d firmware_crc:%04x version:%s\r\n",
+    data_size,hf_data->readData_count,firmware_crc,data_versioin_str);
+
+    // 发送到串口
+    char *uart_rx_data = NULL;
+    int uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, cmd_id, is_ack, data, data_size);
+    uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
+    // 输出固件debug
+    printf("串口命令debug:");
+    for(int i = 0; i < uart_rx_data_length; i++){
+        printf("%02x ",((char*)uart_rx_data)[i]);
+    }
+    printf("\r\n");
+    free(data);
+    ESP_LOGI("ota_uart:","等待设备进入BootLoader\r\n");
+
+    if(xSemaphoreTake(uart_ota_wait_ack_semap, 4000) == pdTRUE)
+    {
+        ESP_LOGI("ota_uart:","设备进入BootLoader成功\r\n");
+        return ESP_OK;
+    }
+    else
+    {
+        ESP_LOGE("ota_uart:","设备进入BootLoader失败\r\n");
+        return ESP_FAIL;
+    }
 }
 
 
@@ -151,10 +211,16 @@ void cmd_send_dev_bootloader_model(void)
 // 开始分批发送固件包
 esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data)
 {
-    // 固件拆分次数
-    char* firmware = (char*)hf_data->data;
-    int firmware_size = hf_data->readData_count;
+    if( cmd_send_dev_bootloader_model(tuya_otoInfo,hf_data) != ESP_OK)
+    {
+        // 进入BootLoader失败
+        return ESP_FAIL;
+    }
+
+    char* firmware = (char*)hf_data->data;          // 固件数据
+    int firmware_size = hf_data->readData_count;    // 固件大小
     // memset(firmware, 0x66, firmware_size);
+    // 计算拆分次数
     int firmware_split_number = (int)user_ceil((double)((double)firmware_size / 128.0000));
 
     char *uart_rx_data = NULL;

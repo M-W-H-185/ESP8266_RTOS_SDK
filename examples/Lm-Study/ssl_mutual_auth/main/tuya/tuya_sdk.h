@@ -5,7 +5,7 @@ typedef struct tuya_ota_info_t
 {
     int     time;
     int     channel;
-    char*   version;
+    char*   version;    // 版本号
     char*   url;
 }tuya_ota_info;
 
