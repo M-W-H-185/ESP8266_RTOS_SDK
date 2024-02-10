@@ -153,10 +153,10 @@ esp_err_t cmd_send_dev_bootloader_model(tuya_ota_info *tuya_otoInfo,http_files_d
     char *data = malloc(data_size); // 加上crc校验和
     memset(data,0x66,data_size);
     // 固件大小
-    data[0] = (uint8_t)((hf_data->readData_count >> 16) & 0xFF);    // 获取高8位
-    data[1] = (uint8_t)((hf_data->readData_count >> 8) & 0xFF);     // 获取中8位
-    data[2] = (uint8_t)((hf_data->readData_count & 0xFF));          // 获取低8位
-    data[3] = 0x00;
+    data[0] = (uint8_t)((hf_data->readData_count >> 24) & 0xFF);
+    data[1] = (uint8_t)((hf_data->readData_count >> 16) & 0xFF);
+    data[2] = (uint8_t)((hf_data->readData_count >> 8) & 0xFF);
+    data[3] = (uint8_t)(hf_data->readData_count & 0xFF);
     // 固件大小
 
     // 固件crc校验
