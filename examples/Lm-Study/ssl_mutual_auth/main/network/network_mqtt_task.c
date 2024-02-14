@@ -63,13 +63,13 @@ static esp_err_t mqtt_subscribe_data_handler(esp_mqtt_event_handle_t event)
     {
         ESP_LOGI(TAG,"ota升级通知\r\n");
 
-        tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
-        memset(tuy_otaInfo.url, '\0', 800);
-        memset(tuy_otaInfo.version, '\0', 30);
-        ota_readIotIssueData(&tuy_otaInfo, event->data);
-        http_files_data myData;
-        http_dowm_files(&myData, tuy_otaInfo.url);
-        ota_send_firmware(&tuy_otaInfo, &myData);
+        // tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
+        // memset(tuy_otaInfo.url, '\0', 800);
+        // memset(tuy_otaInfo.version, '\0', 30);
+        // ota_readIotIssueData(&tuy_otaInfo, event->data);
+        // http_files_data myData;
+        // http_dowm_files(&myData, tuy_otaInfo.url);
+        // ota_send_firmware(&tuy_otaInfo, &myData);
     }
     return ESP_OK;
 }

@@ -19,4 +19,4 @@
 extern SemaphoreHandle_t uart_ota_wait_ack_semap ;
 uint16_t calculateCRC(char *data, int length) ;
 
-esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data);
+esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo);
