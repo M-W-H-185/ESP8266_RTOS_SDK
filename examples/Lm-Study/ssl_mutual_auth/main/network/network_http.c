@@ -98,9 +98,9 @@ esp_err_t http_dowm_files(http_files_data *hf_data,char* url,int range_start, in
             printf("%02x ",((char*)hf_data->data)[i]);
         }
         printf("\r\n");
-
     } else {
         ESP_LOGE(TAG, "File download failed\n");
+     
     }
 
     esp_http_client_cleanup(client);

@@ -91,6 +91,8 @@ uint16_t calculateCRC(char *data, int length) {
 }
 // 等待ack的信号
 SemaphoreHandle_t uart_ota_wait_ack_semap = NULL;
+// 等待设备进入BootLoader
+SemaphoreHandle_t uart_ota_wait_dev_to_bl = NULL;
 
 // uart_data 传入一个空指针进来
 // cmd_id 命令id
@@ -142,10 +144,12 @@ void uart_send_ack_data(void)
 // 让设备接入bootloader模式
 esp_err_t cmd_send_dev_bootloader_model(tuya_ota_info *tuya_otoInfo,http_files_data *hf_data)
 {
-    xSemaphoreTake(uart_ota_wait_ack_semap, 0); // 先把标志位释放了再说
+    esp_err_t ret = ESP_FAIL;
+
+    xSemaphoreTake(uart_ota_wait_dev_to_bl, 0); // 先把标志位释放了再说
     int files_size = hf_data->files_size;
     static uint8_t cmd_id = 0x02;
-    static uint8_t is_ack = 0x01;
+    static uint8_t is_ack = 0x02;
     uint16_t data_size = 
                     sizeof(uint32_t) + sizeof(uint32_t) + // 固件大小 + 固件crc校验
                     sizeof(uint8_t) +   // 版本字符串长度
@@ -191,57 +195,91 @@ esp_err_t cmd_send_dev_bootloader_model(tuya_ota_info *tuya_otoInfo,http_files_d
         printf("%02x ",((char*)uart_rx_data)[i]);
     }
     printf("\r\n");
-    free(data);
+
     ESP_LOGI("ota_uart:","等待设备进入BootLoader\r\n");
 
-    if(xSemaphoreTake(uart_ota_wait_ack_semap, 4000) == pdTRUE)
+    if(xSemaphoreTake(uart_ota_wait_dev_to_bl, 1000) == pdTRUE)
     {
         ESP_LOGI("ota_uart:","设备进入BootLoader成功\r\n");
-        return ESP_OK;
+        ret = ESP_OK;
     }
     else
     {
-        ESP_LOGE("ota_uart:","设备进入BootLoader失败\r\n");
-        return ESP_FAIL;
+            ESP_LOGE("ota_uart:","等待设备进入BootLoader失败:接收方未返回应答信号");
+            uint8_t anew_count = 0;  // 重新发送五次
+            bool success_flag = false;
+            while(anew_count < 5){
+                ESP_LOGE("ota_uart:","重发机制启动,第%d次等待设备进入BootLoader",anew_count);
+                anew_count++;
+                // 再次等待 五次后就抛出异常了
+                uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
+                if(xSemaphoreTake(uart_ota_wait_dev_to_bl, 1000) == pdTRUE)
+                {
+                    ESP_LOGE("ota_uart:","第%d次等待设备进入BootLoader成功",anew_count);
+                    success_flag = true;  // 设置成功标志
+                    ret = ESP_OK;
+                    break;  // 跳出循环，因为成功发送
+                }  
+                else{
+                    ESP_LOGE("ota_uart:","重发机制->等待设备进入BootLoader失败:接收方未返回应答信号");
+                    success_flag = false;  // 设置失败标志
+                    ret = ESP_FAIL;
+                }
+            }
+            if (success_flag == false) 
+            {
+                // 如果标志为false，表示在重新发送的过程中都未成功接收到应答信号
+                free(uart_rx_data);
+                free(data);
+                return ESP_FAIL;
+            }
     }
+    
+    free(uart_rx_data);
+    free(data);
+    return ret;
 }
 
 #define HTTP_RANGE_SIZE  (1024)
+esp_err_t ota_send_firmware_batchCmd(http_files_data * hf_data,int *firmware_split_count);
 
-
-// 开始分批发送固件包
-esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo)
+// http 下载并发送固件到设备
+esp_err_t ota_http_dwom_and_send_firmwaer(tuya_ota_info *tuya_otoInfo)
 {
-    // 固件缓冲区
+  
 
+    // 固件缓冲区
     char firmwaer_buff[HTTP_RANGE_SIZE+200] = {0};
     memset(firmwaer_buff,0x00, HTTP_RANGE_SIZE+200);
     http_files_data myData;
+    // 固件缓冲区
 
 
+    // 获取了文件大小
     myData.files_size = 0;
     myData.readData_count = 0;
     myData.is_dowm = 1; // 1 代表是先文件大小 2才是开始下载东西
     myData.data = firmwaer_buff;
     http_dowm_files(&myData, tuya_otoInfo->url,0,0);
     ESP_LOGI("ota_uart:","files_size:%d\r\n",myData.files_size);
-    // 以上是获取了一次文件大小
-    // if( cmd_send_dev_bootloader_model(tuya_otoInfo,&myData) != ESP_OK)
-    // {
-    //     // 进入BootLoader失败
-    //     return ESP_FAIL;
-    // }
-
+    // 获取了文件大小
+    // 让设备进入BootLoader
+    if( cmd_send_dev_bootloader_model(tuya_otoInfo,&myData) != ESP_OK)
+    {
+        // 设备进入BootLoader失败
+        return ESP_FAIL;
+    }
+    vTaskDelay(10);
     /** 开始固件分片下载 **/
     // 文件大小
     int http_files_size = myData.files_size;    
     // 请求次数
     int http_number_request =  (int)user_ceil((double)((double)http_files_size / (double)HTTP_RANGE_SIZE));
     ESP_LOGI("ota_uart:","http_number_request:%d", http_number_request);
-
     myData.is_dowm = 2; // 1 代表是先文件大小 2才是开始下载东西
-
+    int firmware_split_count = 0;   // 固件拆分计数器
     for (int i = 0; i < http_number_request; i++) {
+        // 计算http分片索引
         int startIndex = i * HTTP_RANGE_SIZE;
         int endIndex = startIndex + HTTP_RANGE_SIZE - 1;
         if(endIndex > http_files_size)
@@ -250,89 +288,130 @@ esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo)
         }
         ESP_LOGI("ota_uart:","this_request:%d  startIndex:%d endIndex:%d",i,startIndex,endIndex);
         myData.readData_count = 0;
-        http_dowm_files(&myData, tuya_otoInfo->url,startIndex,endIndex);
+        esp_err_t ret = http_dowm_files(&myData, tuya_otoInfo->url,startIndex,endIndex);
+        if(ret != ESP_OK)
+        {
+            uint8_t anew_count = 0;  // 重新发送五次
+            bool success_flag = false;
+            while(anew_count < 5){
+                ESP_LOGE("ota_uart:","重发机制启动,第%d次,重新下载固件包",anew_count);
+                anew_count++;
+                // 再次等待 五次后就抛出异常了
+                ret = http_dowm_files(&myData, tuya_otoInfo->url,startIndex,endIndex);
+                if(ret == ESP_OK)
+                {
+                    ESP_LOGE("ota_uart:","第%d次,重新下载固件包",anew_count);
+                    success_flag = true;  // 设置成功标志
+                    break;  // 跳出循环，因为成功发送
+                }  
+                else{
+                    ESP_LOGE("ota_uart:","重发机制->重新下载固件包失败");
+                    success_flag = false;  // 设置失败标志
+                }
+            }
+            if (success_flag == false) 
+            {
+                // 如果标志为false，表示在重新发送的过程中都未成功接收到应答信号
+                return ESP_FAIL;
+            }
+        }
+
+        ota_send_firmware_batchCmd(&myData,&firmware_split_count);    // 将固件通过uart发送出去
+
+        // 固件传输进度计算
+        int Send_percentage = (int)(((double)(i+1) / (double)http_number_request) * (double)100.00);
+        ESP_LOGI("ota_uart:","当前传输进度:%d %%",Send_percentage);
+        // mqtt_topic_DevToIotOTAUpgradeProgress(9,Send_percentage);
     }
+    // mqtt_topic_DevToIotOTAUpgradeProgress(9,100);
+    ESP_LOGI("ota_uart:","固件传输完成\r\n");
 
+    /** 结束固件分片下载 **/
+    return ESP_OK;
+}
 
+// 开始分批发送固件包
+esp_err_t ota_send_firmware_batchCmd(http_files_data * hf_data,int *firmware_split_count)
+{
 
-    // char* firmware = (char*)hf_data->data;          // 固件数据
-    // int firmware_size = hf_data->readData_count;    // 固件大小
-    // // memset(firmware, 0x66, firmware_size);
-    // // 计算拆分次数
-    // int firmware_split_number = (int)user_ceil((double)((double)firmware_size / 128.0000));
+    char* firmware = (char*)hf_data->data;      // 固件数据
+    int firmware_size = hf_data->readData_count;    // 固件大小
+    // memset(firmware, 0x66, firmware_size);
+    // 计算拆分次数
+    int firmware_split_number = (int)user_ceil((double)((double)firmware_size / 128.0000));
+    // 计算总拆分次数
+    uint8_t total_fireware_split_number =  (int)user_ceil((double)((double)hf_data->files_size / 128.0000));
 
-    // char *uart_rx_data = NULL;
-    // int uart_rx_data_length = 0;
-    // for (int i = 0; i < firmware_split_number; i++)
-    // {
-    //    	int firmware_block_size = 0;	// 固件包大小
-	// 	ESP_LOGI("ota_uart:","第%d次拆分->固件当前索引位:%d", i, (i * 128));
-	// 	if(firmware_size - (i*128) > 128 )
-	// 	{
-	// 		firmware_block_size = 128;
-	// 	}
-	// 	else{
-	// 		firmware_block_size = firmware_size - ((i)*128);
-	// 	}
-	// 	printf("分包大小：%d\r\n",firmware_block_size);
-    //     char *firmware_block = malloc(2 + firmware_block_size);// +1 是因为需要加上现在是第几个固件包 
-    //     firmware_block[0] = i ;      // 现在是第i个固件包
-    //     firmware_block[1] = firmware_split_number - 1; // 一共有多少个分包 - 1 从0开始计算 0、1、2、3
-    //     char *temp = &firmware_block[2];
-    //     memcpy( temp, (char *)(firmware+(i * 128)) ,  firmware_block_size * sizeof(char));
-    //     uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x03, 0x01, firmware_block, firmware_block_size + 2);
-    //     uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
+    char *uart_rx_data = NULL;
+    int uart_rx_data_length = 0;
+    for (int i = 0; i < firmware_split_number; i++)
+    {
+        (*firmware_split_count)++; // 固件拆分计数器
+       	int firmware_block_size = 0;	// 固件包大小
+		ESP_LOGI("ota_uart:","第%d次拆分->固件当前索引位:%d", i, (i * 128));
+		if(firmware_size - (i*128) > 128 )
+		{
+			firmware_block_size = 128;
+		}
+		else{
+			firmware_block_size = firmware_size - ((i)*128);
+		}
+		printf("分包大小：%d\r\n",firmware_block_size);
+        char *firmware_block = malloc(2 + firmware_block_size);// +1 是因为需要加上现在是第几个固件包 
+        firmware_block[0] = *firmware_split_count;               // 现在是第i个固件包
+        firmware_block[1] = (uint8_t)total_fireware_split_number;    // 总分包次数
+        char *temp = &firmware_block[2];
+        memcpy( temp, (char *)(firmware+(i * 128)) ,  firmware_block_size * sizeof(char));
+        uart_rx_data_length = uart_send_cmdid_data_handle(&uart_rx_data, 0x03, 0x01, firmware_block, firmware_block_size + 2);
+        uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
       
-    //     // 输出固件debug
-    //     printf("串口命令debug:");
-	// 	for(int i = 0; i < uart_rx_data_length; i++){
-	// 		printf("%02x ",((char*)uart_rx_data)[i]);
-	// 	}
-	// 	printf("\r\n");
-	//     // 输出固件debug
+        // 输出固件debug
+        printf("串口命令debug:");
+		for(int i = 0; i < uart_rx_data_length; i++){
+			printf("%02x ",((char*)uart_rx_data)[i]);
+		}
+		printf("\r\n");
+	    // 输出固件debug
+        vTaskDelay(10);
 
-    //     ESP_LOGI("ota_uart:","等待ack中");
-    //     if(xSemaphoreTake(uart_ota_wait_ack_semap, 1000) == pdTRUE)
-    //     {
-    //         ESP_LOGE("ota_uart:","发送%d固件包成功",i);
-    //     }
-    //     else{
-    //         ESP_LOGE("ota_uart:","发送固件包失败:接收方未返回应答信号");
-    //         uint8_t anew_count = 0;  // 重新发送五次
-    //         bool success_flag = false;
-    //         while(anew_count < 5){
-    //             ESP_LOGE("ota_uart:","重发机制启动,重新发送%d固件包",i);
-    //             anew_count++;
-    //             // 再次等待 五次后就抛出异常了
-    //             uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
-    //             if(xSemaphoreTake(uart_ota_wait_ack_semap, 1000) == pdTRUE)
-    //             {
-    //                 ESP_LOGE("ota_uart:","发送%d固件包成功",i);
-    //                 success_flag = true;  // 设置成功标志
-    //                 break;  // 跳出循环，因为成功发送
-    //             }  
-    //             else{
-    //                 ESP_LOGE("ota_uart:","重发机制->发送固件包失败:接收方未返回应答信号");
-    //                 success_flag = false;  // 设置失败标志
-    //             }
-    //         }
-    //         if (success_flag == false) 
-    //         {
-    //             // 如果标志为false，表示在重新发送的过程中都未成功接收到应答信号
-    //             return ESP_FAIL;
-    //         }
-    //     }
-    //     // 固件传输进度计算
-    //     int Send_percentage = (int)(((double)(i+1) / (double)firmware_split_number) * (double)100.00);
-    //     ESP_LOGI("ota_uart:","当前传输进度:%d%%",Send_percentage);
-    //     mqtt_topic_DevToIotOTAUpgradeProgress(9,Send_percentage);
-	// 	// 释放分配的内存
-    //     free(uart_rx_data);
-    //     free(firmware_block);
-    // }
-    // ESP_LOGI("ota_uart:","当前传输进度:%d%%",100);
-    // // mqtt_topic_DevToIotOTAUpgradeProgress(9,100);
-    // ESP_LOGE("ota_uart:","固件已发送完成...");
+        ESP_LOGI("ota_uart:","等待ack中");
+        if(xSemaphoreTake(uart_ota_wait_ack_semap, 1000) == pdTRUE)
+        {
+            ESP_LOGE("ota_uart:","发送%d固件包成功",i);
+        }
+        else{
+            ESP_LOGE("ota_uart:","发送固件包失败:接收方未返回应答信号");
+            uint8_t anew_count = 0;  // 重新发送五次
+            bool success_flag = false;
+            while(anew_count < 5){
+                ESP_LOGE("ota_uart:","重发机制启动,重新发送%d固件包",i);
+                anew_count++;
+                // 再次等待 五次后就抛出异常了
+                uart_write_bytes(UART_NUM_0, uart_rx_data, uart_rx_data_length);
+                if(xSemaphoreTake(uart_ota_wait_ack_semap, 1000) == pdTRUE)
+                {
+                    ESP_LOGE("ota_uart:","发送%d固件包成功",i);
+                    success_flag = true;  // 设置成功标志
+                    break;  // 跳出循环，因为成功发送
+                }  
+                else{
+                    ESP_LOGE("ota_uart:","重发机制->发送固件包失败:接收方未返回应答信号");
+                    success_flag = false;  // 设置失败标志
+                }
+            }
+            if (success_flag == false) 
+            {
+                // 如果标志为false，表示在重新发送的过程中都未成功接收到应答信号
+                return ESP_FAIL;
+            }
+        }
+      
+		// 释放分配的内存
+        free(uart_rx_data);
+        free(firmware_block);
+    }
+ 
+    ESP_LOGE("ota_uart:","当前串口发送分包完成...");
     return ESP_OK;
 }
 

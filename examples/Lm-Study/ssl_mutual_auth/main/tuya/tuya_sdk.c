@@ -5,9 +5,10 @@
 #include <stdlib.h>
 #include "tuya_sdk.h"
 #include "esp_log.h"
+#include "esp_err.h"
 #include "cJSON.h"
 static const char *TAG = "TUYA_SDK";
-char* ota_OTAUpgradeProgressToJSON(int channel,int progress)
+esp_err_t ota_OTAUpgradeProgressToJSON(char *buff, int channel, int progress)
 {
     // {
     //     "msgId":"45lkj3551234***",
@@ -17,23 +18,37 @@ char* ota_OTAUpgradeProgressToJSON(int channel,int progress)
     //         "progress":98
     //     }
     // }
-    // /* 创建一个JSON数据对象(链表头结点) -> {} */
-    cJSON *cjson_Boby = cJSON_CreateObject();
-    cJSON_AddStringToObject(cjson_Boby, "msgId", "45lkj3551234");
-    cJSON_AddNumberToObject(cjson_Boby, "time", 1705912127);
-    // boby下面的data
-    cJSON *cjson_Boby_data = cJSON_CreateObject();
-    cJSON_AddNumberToObject(cjson_Boby_data,"channel",channel);
-    cJSON_AddNumberToObject(cjson_Boby_data,"progress",progress);
-    // 将data放入boby
-    cJSON_AddItemToObject(cjson_Boby,"data",cjson_Boby_data);
-
-    char *str = cJSON_Print(cjson_Boby);
-
-    cJSON_Delete(cjson_Boby);
-    cJSON_Delete(cjson_Boby_data);
-
-    return str;
+    esp_err_t ret = ESP_FAIL;
+    if(buff == NULL)
+    {
+        ret = ESP_FAIL;
+        return ret;
+    }
+    // 创建外层 JSON 对象
+    cJSON *root = cJSON_CreateObject();
+    // 添加 "msgId" 字段
+    cJSON_AddStringToObject(root, "msgId", "");
+    // 添加 "time" 字段
+    cJSON_AddNumberToObject(root, "time", 167189638);
+    // 创建内层 JSON 对象 "data"
+    cJSON *dataObj = cJSON_CreateObject();
+    // 添加 "channel" 字段
+    cJSON_AddNumberToObject(dataObj, "channel", channel);
+    // 添加 "progress" 字段
+    cJSON_AddNumberToObject(dataObj, "progress", progress);
+    // 将内层 JSON 对象添加到外层对象中
+    cJSON_AddItemToObject(root, "data", dataObj);
+    // 将 JSON 对象转换为字符串并复制到传入的 buff 中
+    if(strlen(cJSON_Print(root)) > sizeof(buff))
+    {
+        strcpy(buff, cJSON_Print(root));
+        ret = ESP_OK;
+        cJSON_Delete(root);
+        return ret;
+    }
+    // 释放内存
+    cJSON_Delete(root);
+    return ret;
 }
 //  返回ota设备的JSON字符串
 void ota_DevInfoVer_str(char*buff,char *bizType, char *pid, char *firmwareKey, int channel, char *version)

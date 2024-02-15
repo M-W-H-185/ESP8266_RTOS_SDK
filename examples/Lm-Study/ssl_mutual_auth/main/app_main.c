@@ -52,6 +52,11 @@ static const char *TAG = "MAIN";
 void ota_uart_data_handle(char *uart_data, int length)
 {
     ESP_LOGI("ota_uart:","length:%d",length);
+    for (size_t i = 0; i < length; i++)
+    {
+        printf("%02x ",uart_data[i]);
+    }
+    printf("\r\n");
     if(uart_data[0] != UART_DATA_HEAD_1 || uart_data[1] != UART_DATA_HEAD_2)
     {
         ESP_LOGE("ota_uart:","串口ota数据包头异常\r\n");
@@ -76,7 +81,7 @@ void ota_uart_data_handle(char *uart_data, int length)
     char cmd_id = uart_data[2];
     char isack = uart_data[3]; 
     uint16_t data_length = ((uart_data)[4] << 8) | (uart_data)[5];  // 数据区长度
-
+    
     switch (cmd_id)
     {
         case 0x00:
@@ -84,7 +89,24 @@ void ota_uart_data_handle(char *uart_data, int length)
                 xSemaphoreGive(uart_ota_wait_ack_semap);
             break;
         case 0x01:
-                ESP_LOGI("ota_uart:","版本信息命令\r\n"); 
+                ESP_LOGI("ota_uart:","版本信息命令\r\n");
+                char mode = uart_data[6];
+                char v_length = uart_data[7];   // 字符串长度
+                ESP_LOGI("ota_uart:","App版本字符串长度%d \r\n",v_length);
+                char v_str[100] = {0};
+                memset(v_str,0,100);
+                memcpy(v_str, (char*)&uart_data[8], v_length);
+                if(mode == 0x01)    // BootLoader
+                {
+                    xSemaphoreGive(uart_ota_wait_dev_to_bl);
+                    ESP_LOGI("ota_uart:","当前处于设备BootLoader模式:%s\r\n",v_str);
+                } 
+                else
+                {
+                    ESP_LOGI("ota_uart:","当前处于设备App模式:%s\r\n",v_str);
+                    mqtt_topic_DevToIotOTAInfoVer(9,v_str);
+                }
+               
             break;
         case 0x02:
                 ESP_LOGI("ota_uart:","bool模式命令\r\n"); 
@@ -137,7 +159,8 @@ static void uart_select_task()
 void UART_Init(void)
 {
     uart_ota_wait_ack_semap =  xSemaphoreCreateBinary();    // 创建一个二值信号量用于等待串口ato
-
+    uart_ota_wait_dev_to_bl =  xSemaphoreCreateBinary();  
+    
     // 创建一个uart任务处理事件
     xTaskCreate(uart_select_task, "uart_select_task", 4*1024, NULL, 5, NULL);
 }
@@ -171,18 +194,18 @@ void app_main(void)
     // ESP_LOGI(TAG,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%s",buff);
     // // // ESP_LOGI(TAG,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%s  \r\n %d",temo,strlen(temo));
 
-    ESP_ERROR_CHECK(example_connect());
-    // mqtt_app_start();
-    // vTaskDelay(5);
 
-    ESP_LOGI(TAG,"111\r\n");
+    ESP_ERROR_CHECK(example_connect());
+    mqtt_app_start();
+    vTaskDelay(105);
+
     tuya_ota_info tuy_otaInfo = {
         .channel = 9,
         .time = 1707916580, 
         .url = "http://note-xm.oss-cn-guangzhou.aliyuncs.com/otatest/stm32_app_v0.0.1.bin",
         .version = "0.0.1",
     };
-    ota_send_firmware(&tuy_otaInfo);
+    ota_http_dwom_and_send_firmwaer(&tuy_otaInfo);
 
     // // // 解析涂鸦ota固件json数据
     // tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};

@@ -1,5 +1,11 @@
 #pragma once
 
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <stdlib.h>
+#include "esp_err.h"
+
 // 存涂鸦ota传过来的固件信息
 typedef struct tuya_ota_info_t
 {
@@ -11,7 +17,7 @@ typedef struct tuya_ota_info_t
 
 
 // 返回ota升级进度json字符串
-char* ota_OTAUpgradeProgressToJSON(int channel,int progress);
+esp_err_t ota_OTAUpgradeProgressToJSON(char *buff, int channel,int progress);
 
 //  返回ota设备的字符串
 void ota_DevInfoVer_str(char *buff, char *bizType, char *pid, char *firmwareKey, int channel, char *version);

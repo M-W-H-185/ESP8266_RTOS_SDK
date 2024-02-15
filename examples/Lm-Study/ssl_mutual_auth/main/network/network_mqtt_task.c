@@ -11,7 +11,7 @@ static const char *TAG = "MQTTS_EXAMPLE";
 #define  MQTT_BUFF_LENGTH 1024*2
 static char mqtt_buff[MQTT_BUFF_LENGTH] = {0};
 
-esp_mqtt_client_handle_t mqtt_client; 
+esp_mqtt_client_handle_t mqtt_client = NULL; 
 typedef struct mqtt_topic_config_t{
     char qos;
     const char *topic;
@@ -32,8 +32,14 @@ static const mqtt_topic_config topic_IotToDevOTAissue = { .qos = 0, .topic = "ty
 // 上报ota升级进度
 esp_err_t mqtt_topic_DevToIotOTAUpgradeProgress(int channel,int progress)
 {
+    if(mqtt_client == NULL)
+    {
+        return ESP_FAIL;
+    }
+
     int msg_id = 1;
-    char* str = ota_OTAUpgradeProgressToJSON(channel,progress);
+    char str[500] = {0} ;
+    ota_OTAUpgradeProgressToJSON(str, channel, progress);
     ESP_LOGI(TAG,"%s\r\n",str);
     cJSON_free(str);
 
@@ -45,6 +51,26 @@ esp_err_t mqtt_topic_DevToIotOTAUpgradeProgress(int channel,int progress)
     ESP_LOGI(TAG, "mqtt_topic_DevToIotOTAUpgradeProgress msg_id=%d", msg_id);
     return ESP_OK;
     
+}
+// 上报版本信息
+esp_err_t mqtt_topic_DevToIotOTAInfoVer(int channel,char* v_str)
+{
+    if(mqtt_client == NULL)
+    {
+        return ESP_FAIL;
+    }
+    // 推送ota信息
+    int msg_id = 1;
+    memset(mqtt_buff,'\0',MQTT_BUFF_LENGTH);    // 清空
+    ota_DevInfoVer_str(mqtt_buff,"INIT","l5jc92kpr20a1wcn","keywrsh88jjv99pr",9,v_str);    // 转换json
+    
+    msg_id = esp_mqtt_client_publish(
+                    mqtt_client, topic_DevToIotOTAInfoVer.topic, 
+                    mqtt_buff,
+                    0, topic_DevToIotOTAInfoVer.qos, 0
+                );
+    ESP_LOGI(TAG, "mqtt_topic_DevToIotOTAUpgradeProgress msg_id=%d", msg_id);
+    return ESP_OK;
 }
 // 订阅mqtt主题信息的处理
 static esp_err_t mqtt_subscribe_data_handler(esp_mqtt_event_handle_t event)

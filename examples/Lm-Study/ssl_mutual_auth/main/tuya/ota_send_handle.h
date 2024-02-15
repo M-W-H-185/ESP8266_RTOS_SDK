@@ -17,6 +17,9 @@
 #define UART_DATA_HEAD_2 0x90
 
 extern SemaphoreHandle_t uart_ota_wait_ack_semap ;
+extern SemaphoreHandle_t uart_ota_wait_dev_to_bl ;
 uint16_t calculateCRC(char *data, int length) ;
 
-esp_err_t ota_send_firmware(tuya_ota_info *tuya_otoInfo);
+esp_err_t ota_http_dwom_and_send_firmwaer(tuya_ota_info *tuya_otoInfo);
+
+
