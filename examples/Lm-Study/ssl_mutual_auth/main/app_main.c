@@ -197,15 +197,9 @@ void app_main(void)
 
     ESP_ERROR_CHECK(example_connect());
     mqtt_app_start();
-    vTaskDelay(105);
+    // vTaskDelay(105);
 
-    tuya_ota_info tuy_otaInfo = {
-        .channel = 9,
-        .time = 1707916580, 
-        .url = "http://note-xm.oss-cn-guangzhou.aliyuncs.com/otatest/stm32_app_v0.0.1.bin",
-        .version = "0.0.1",
-    };
-    ota_http_dwom_and_send_firmwaer(&tuy_otaInfo);
+
 
     // // // 解析涂鸦ota固件json数据
     // tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};

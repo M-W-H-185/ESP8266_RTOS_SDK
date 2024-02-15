@@ -321,9 +321,9 @@ esp_err_t ota_http_dwom_and_send_firmwaer(tuya_ota_info *tuya_otoInfo)
         // 固件传输进度计算
         int Send_percentage = (int)(((double)(i+1) / (double)http_number_request) * (double)100.00);
         ESP_LOGI("ota_uart:","当前传输进度:%d %%",Send_percentage);
-        // mqtt_topic_DevToIotOTAUpgradeProgress(9,Send_percentage);
+        mqtt_topic_DevToIotOTAUpgradeProgress(9,Send_percentage);
     }
-    // mqtt_topic_DevToIotOTAUpgradeProgress(9,100);
+    mqtt_topic_DevToIotOTAUpgradeProgress(9,100);
     ESP_LOGI("ota_uart:","固件传输完成\r\n");
 
     /** 结束固件分片下载 **/

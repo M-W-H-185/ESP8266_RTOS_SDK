@@ -77,25 +77,34 @@ static esp_err_t mqtt_subscribe_data_handler(esp_mqtt_event_handle_t event)
 {
     printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
     printf("DATA=%.*s\r\n", event->data_len, event->data);
+    // printf("code_topic_lenght:%d  mqtt_server_topic_length:%d  %d\r\n"
+    //             ,strlen(topic_IotControlToDevData.topic),strlen(event->topic),event->topic_len);
+    
+    // mqtt主题    
+    char mqtt_topic[200] = {0};
+    memset(mqtt_topic,0x00,200);
+    memcpy(mqtt_topic, event->topic, event->topic_len);
+
     // 通过topic判断平台发送过来的是什么东西
     // 云平台控制设备
-    if(strcmp(topic_IotControlToDevData.topic, event->topic))
+    if(strcasecmp(topic_IotControlToDevData.topic, mqtt_topic) == 0)
     {
-        ESP_LOGI(TAG,"平台控制设备\r\n");
+        ESP_LOGI(TAG,"平台控制设备");
     }
 
     // 云平台向设备发送固件升级包uri 也就是通知设备升级了
-    if(strcmp(topic_IotToDevOTAissue.topic, event->topic))
+    if(strcasecmp(topic_IotToDevOTAissue.topic, mqtt_topic) == 0)
     {
-        ESP_LOGI(TAG,"ota升级通知\r\n");
+        ESP_LOGI(TAG,"ota升级通知");
 
-        // tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
-        // memset(tuy_otaInfo.url, '\0', 800);
-        // memset(tuy_otaInfo.version, '\0', 30);
-        // ota_readIotIssueData(&tuy_otaInfo, event->data);
+        tuya_ota_info tuy_otaInfo = {.channel = 0,.time = 0, .url = malloc(800), .version = malloc(30)};
+        memset(tuy_otaInfo.url, '\0', 800);
+        memset(tuy_otaInfo.version, '\0', 30);
+        ota_readIotIssueData(&tuy_otaInfo, event->data);
         // http_files_data myData;
         // http_dowm_files(&myData, tuy_otaInfo.url);
         // ota_send_firmware(&tuy_otaInfo, &myData);
+        ota_http_dwom_and_send_firmwaer(&tuy_otaInfo);
     }
     return ESP_OK;
 }
